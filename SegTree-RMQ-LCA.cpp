@@ -1,4 +1,12 @@
+/**
+  * This file includes an implementation of Segment Trees, as well as data structures for the
+  * Range Minimum Query and Lowest Common Ancestor problems. These are all in the same file
+  * because they are closely related - RMQ can be implemented as a special case of a segtree,
+  * while LCA can be reduced to RMQ on a specially constructed vector.
+  */
+
 #include <vector>
+#include <string>
 #include <iostream>
 
 using namespace std;
@@ -23,7 +31,8 @@ struct SegTree {
     vector<SegTree<T> > children;
     T (*func)(T, T);
 
-    SegTree(vector<T> &a, T (*func)(T, T), int left = -1, int right = -1) {
+    SegTree() {}
+    SegTree(const vector<T> &a, T (*func)(T, T), int left = -1, int right = -1) {
         if (right == -1) {
             left = 0;
             right = a.size() - 1;
@@ -37,8 +46,8 @@ struct SegTree {
             this->value = a[left]; return;
         }
 
-        SegTree<T> leftChild = SegTree(a, func, left, this->mid);
-        SegTree<T> rightChild = SegTree(a, func, this->mid+1, right);
+        SegTree<T> leftChild = SegTree<T>(a, func, left, this->mid);
+        SegTree<T> rightChild = SegTree<T>(a, func, this->mid+1, right);
         this->children.push_back(leftChild);
         this->children.push_back(rightChild);
         this->value = (*func)(leftChild.value, rightChild.value);
@@ -46,6 +55,7 @@ struct SegTree {
     }
 
     T rangeQuery(int left, int right) {
+        // Expects left < right
         if (left == this->left and right == this->right) {
             return this->value;
         }
@@ -78,30 +88,31 @@ struct SegTree {
     }
 };
 
-template <typename T> T getMin(T a, T b) {
-    return min(a, b); // Hope that min() knows how to do it!
-}
 
 /**
- * Would be nice to have a templated RMQ struct which inherits from SegTree.
- * It would be as simple as setting this->func = getMin()
- * But I was having problems with calling the SegTree ctor from RMQ.
- */
-/*
-template <typename T>
-struct RMQ : public SegTree<T> {
-    RMQ(vector<int> &a, int left = -1, int right = -1) {
-        this = SegTree<T>(a, getMin, left, right);
-    }
-};
-*/
-
-/**
- * LCA on a static tree, implemented by transforming the problem into an RMQ instance.
+ * Templated RMQ struct which inherits from SegTree.
+ * It's just a SegTree with this->func = getMin()
  * Ctor args:
+ *      RMQ(const vector<T> &a)
  *
- * Has operations:
+ * Has the same operations as SegTree:
+ *      T rangeQuery(int left, int right)
+ *      void update(int idx, T newVal)
+ */
+template<typename T>
+struct RMQ : SegTree<T> {
+    static T getMin(T a, T b) {return min(a, b);} // Hope that min() knows how to do it!
+    RMQ(const vector<T>& a) : SegTree<T>(a, RMQ<T>::getMin) {}
+    RMQ() {}
+};
+
+/**
+ * LCA on a static directed tree, implemented by transforming the problem into an RMQ instance.
+ * Ctor args:
+ *      LCA(int root, const vector<vector<int> > &neighbors)
  *
+ * Has operation:
+ *      int lcaQuery(int node1, int node2)
  */
 struct LCA {
     /* We're going to make a vector of ints such that LCA on two nodes corresponds
@@ -109,49 +120,64 @@ struct LCA {
        nodes into indices and vice versa.
     */
     vector<int> nodeToRMQIndex;
-    vector<int> RMQindexToNode;
-    SegTree rmq;
+    RMQ<pair<int, int> > rmq; // will hold <depth, node> pairs
 
-    LCA(int root, vector<vector<int> > neighbors) {
-        vector<int> rmqVec; // We'll construct this with a DFS
+    LCA(int root, const vector<vector<int> > &neighbors) {
+        this->nodeToRMQIndex.resize(neighbors.size());
 
+        // Need to construct vector such that LCA corresponds to RMQ.
+        vector<pair<int, int> > rmqVec; // <depth, node>
+        int currDepth = 0;
+        this->dfs(root, currDepth, neighbors, rmqVec); // populates rmqVec and nodeToRMQIndex
+        this->rmq = RMQ<pair<int, int> >(rmqVec);
+    }
+
+    void dfs(int node, int currDepth, const vector<vector<int> > &neighbors, vector<pair<int, int> > &rmqVec) {
+        // The whole point is to add the dfs paths to rmqVec, so expect rmqVec to be modified.
+        // Also changes nodeToRMQIndex
+        pair<int, int> curr = pair<int, int>(currDepth, node);
+        rmqVec.push_back(curr);
+        this->nodeToRMQIndex[node] = rmqVec.size() - 1; // We're writing the depth of node in rmqVec multiple times, but
+                                                        // it turns out that we can use any of those positions in rmqVec
+                                                        // for doing the RMQ calculation which corresponds to LCA
+        for (int i = 0; i < neighbors[node].size(); i++) {
+            this->dfs(neighbors[node][i], currDepth + 1, neighbors, rmqVec);
+            rmqVec.push_back(curr);
+        }
+    }
+
+    int lcaQuery(int node1, int node2) {
+        int rmqIndex1 = this->nodeToRMQIndex[node1];
+        int rmqIndex2 = this->nodeToRMQIndex[node2];
+        if (rmqIndex1 > rmqIndex2) {swap(rmqIndex1, rmqIndex2);}
+        pair<int, int> result = this->rmq.rangeQuery(rmqIndex1, rmqIndex2); // <depth, node>
+        return result.second;
     }
 };
 
 
-
-
-int mx(int a, int b) {return min(a, b);}
-
 bool testSegTrees = false;
-bool testRMQ = true;
+bool testRMQ = false;
+bool testLCA = true;
 int main(void) {
-    if (testSegTrees) {
-        vector<int> a;
-        for (int i = 0; i < 10; i++) {
-            a.push_back((3*i + 2) % 10);
-        }
-        SegTree<int> st = SegTree<int>(a, mx);
-        cout << "Vector a:\n";
-        for (int i = 0; i < a.size(); i++) {
-            cout << a[i] << " ";
-        }
-        cout << "\n" << st.rangeQuery(0, 5);
-        st.update(3, 9);
-        cout << "\n" << st.rangeQuery(0, 5);
-        st.update(0, 9);
-        cout << "\n" << st.rangeQuery(0, 5);
+    if (testLCA) {
+        /* Test it on the following tree:    1
+                                           2   5
+                                          3 4
+        */
+        vector<vector<int> > neighbors;
+        neighbors.resize(6); // 1 indexed
+        neighbors[1].push_back(2); neighbors[1].push_back(5);
+        neighbors[2].push_back(3); neighbors[2].push_back(4);
+
+        LCA lcaTest(1, neighbors);
+        cout << lcaTest.lcaQuery(3, 4) << "\n";
+        cout << lcaTest.lcaQuery(3, 5) << "\n";
+        cout << lcaTest.lcaQuery(2, 3) << "\n";
+        cout << lcaTest.lcaQuery(4, 4) << "\n";
+        cout << lcaTest.lcaQuery(5, 3) << "\n";
+
+        // Outputs 2, 1, 2, 4, 1 as it should.
     }
-    if (testRMQ) {
-        vector<int> a;
-        for (int i = 0; i < 10; i++) {
-            a.push_back((3*i+2) % 10);
-        }
-        RMQ<int> aRMQ = RMQ<int>(a);
-        cout << "Look at a:\n";
-        for (int i = 0; i < a.size(); i++) {
-            cout << a[i] << " ";
-        }
-        cout << "\n" << aRMQ.rangeQuery(3, 5);
-    }
+
 }
